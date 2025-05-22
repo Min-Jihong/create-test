@@ -7,6 +7,11 @@ on:
         description: 'Name of the Next.js project'
         required: true
         type: string
+  push:
+    branches:
+      - main
+  repository_dispatch:
+    types: [create-next-app]
 
 jobs:
   create-next-app:
@@ -14,7 +19,17 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Debug Information
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Directory contents:"
+          ls -la
+          echo "GitHub event:"
+          cat $GITHUB_EVENT_PATH
+      
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -23,7 +38,8 @@ jobs:
           
       - name: Create Next.js Project
         run: |
-          npx create-next-app@latest "${github.event.inputs.projectName}" --typescript --tailwind --eslint --src-dir --app --import-alias "@/*"
+          echo "Creating Next.js project: ${{ github.event.inputs.projectName || 'my-next-app' }}"
+          npx create-next-app@latest "${{ github.event.inputs.projectName || 'my-next-app' }}" --typescript --tailwind --eslint --src-dir --app --import-alias "@/*" --yes
           
       - name: Configure Git
         run: |
@@ -32,6 +48,9 @@ jobs:
           
       - name: Commit and Push Changes
         run: |
+          echo "Current directory after create-next-app:"
+          ls -la
+          git status
           git add .
           git commit -m "Initialize Next.js project"
-          git push
+          git push origin main
