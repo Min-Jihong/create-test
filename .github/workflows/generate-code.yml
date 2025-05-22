@@ -1,0 +1,120 @@
+name: AI Code Generation
+
+on:
+  repository_dispatch:
+    types: [generate-code]
+
+jobs:
+  generate-code:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Debug Information
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Directory contents:"
+          ls -la
+          echo "GitHub event:"
+          cat $GITHUB_EVENT_PATH
+      
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Install Dependencies
+        run: |
+          npm install @anthropic-ai/sdk
+          
+      - name: Generate Code
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          node -e "
+            const { Anthropic } = require('@anthropic-ai/sdk');
+            const fs = require('fs');
+            const path = require('path');
+            
+            const anthropic = new Anthropic({
+              apiKey: process.env.ANTHROPIC_API_KEY,
+            });
+            
+            async function generateCode() {
+              const userRequest = '${github.event.client_payload.userRequest}';
+              
+              // 현재 프로젝트 구조 분석
+              const projectStructure = {};
+              function analyzeDirectory(dir, relativePath = '') {
+                const items = fs.readdirSync(dir);
+                items.forEach(item => {
+                  if (item === 'node_modules' || item === '.git') return;
+                  
+                  const fullPath = path.join(dir, item);
+                  const relPath = path.join(relativePath, item);
+                  
+                  if (fs.statSync(fullPath).isDirectory()) {
+                    projectStructure[relPath] = analyzeDirectory(fullPath, relPath);
+                  } else {
+                    projectStructure[relPath] = fs.readFileSync(fullPath, 'utf-8');
+                  }
+                });
+                return projectStructure;
+              }
+              
+              const structure = analyzeDirectory('.');
+              
+              // AI에게 코드 생성 요청
+              const response = await anthropic.messages.create({
+                model: 'claude-3-sonnet-20240229',
+                max_tokens: 4000,
+                messages: [{
+                  role: 'user',
+                  content: `다음은 Next.js 프로젝트의 현재 구조입니다:
+                  ${JSON.stringify(structure, null, 2)}
+                  
+                  사용자의 요청: "${userRequest}"
+                  
+                  이 요청에 따라 필요한 파일들을 생성하거나 수정해주세요. 각 파일의 전체 내용을 포함해주세요.
+                  응답은 다음 JSON 형식으로 해주세요:
+                  {
+                    "files": [
+                      {
+                        "path": "파일 경로",
+                        "content": "파일 내용"
+                      }
+                    ]
+                  }`
+                }]
+              });
+              
+              // AI 응답 파싱
+              const aiResponse = JSON.parse(response.content[0].text);
+              
+              // 파일 생성 또는 수정
+              aiResponse.files.forEach(file => {
+                const dir = path.dirname(file.path);
+                if (!fs.existsSync(dir)) {
+                  fs.mkdirSync(dir, { recursive: true });
+                }
+                fs.writeFileSync(file.path, file.content);
+              });
+            }
+            
+            generateCode().catch(console.error);
+          "
+          
+      - name: Configure Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+      - name: Commit and Push Changes
+        run: |
+          git add .
+          git commit -m "AI generated code based on user request"
+          git push origin main
